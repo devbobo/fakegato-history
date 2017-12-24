@@ -17,7 +17,7 @@ module.exports = function(pHomebridge) {
         Characteristic = homebridge.hap.Characteristic;
         Service = homebridge.hap.Service;
     }
-    
+
     var hexToBase64 = function(val) {
         return new Buffer((''+val).replace(/[^0-9A-F]/ig, ''), 'hex').toString('base64');
     }, base64ToHex = function(val) {
@@ -43,8 +43,10 @@ module.exports = function(pHomebridge) {
         if(len) {
             return ('0000000000000' + s).slice(-1 * len);
         }
-    return s;
-}
+        return s;
+    }, ucfirst = function(val) {
+        return val.charAt(0).toUpperCase() + val.substr(1);
+    }
 
     class S2R1Characteristic extends Characteristic {
         constructor() {
@@ -103,115 +105,64 @@ module.exports = function(pHomebridge) {
     S2W2Characteristic.UUID = 'E863F121-079E-48FF-8F27-9C2605A29F52';
 
     class FakeGatoHistoryService extends Service {
-        constructor(accessoryType, accessory, size) {
-            if (typeof size === 'undefined') { size = 4032; }
+        constructor(displayName, subtype) {
+            super(displayName, FakeGatoHistoryService.UUID, subtype);
             
-            super(accessory.displayName + " History", FakeGatoHistoryService.UUID);
-
-            var entry2address = function(val) {
-                var temp = val % this.memorySize;
-                return temp;
-            }.bind(this);
-
-            this.log = accessory.log;
-            switch (accessoryType) {
-                case TYPE_WEATHER:
-                    this.accessoryType116 = "03";
-                    this.accessoryType117 = "07";
-                    break;
-                case TYPE_ENERGY:
-                    this.accessoryType116 = "07";
-                    this.accessoryType117 = "1f";
-                    break;
-                case TYPE_ROOM:
-                    this.accessoryType116 = "04";
-                    this.accessoryType117 = "0f";
-                    break;
-            }
-
-            this.accessoryType = accessoryType;
-            this.firstEntry = 0;
-            this.lastEntry = 0;
-            this.history = [];
-            this.memorySize = size;
-            this.usedMemory = 0;
-            this.currentEntry = 1;
-            this.transfer = false;
-            this.setTime = true;
-            this.refTime = 0;
-            this.memoryAddress = 0;
-            this.dataStream = '';
-
             this.addCharacteristic(S2R1Characteristic);
+            this.addCharacteristic(S2R2Characteristic);
+            this.addCharacteristic(S2W1Characteristic);
+            this.addCharacteristic(S2W2Characteristic);
+        }
+    }
 
-            this.addCharacteristic(S2R2Characteristic)
-                .on('get', (callback) => {
-                    if ((this.currentEntry < this.lastEntry) && (this.transfer == true)) {
-                        this.memoryAddress = entry2address(this.currentEntry);
+    FakeGatoHistoryService.UUID = 'E863F007-079E-48FF-8F27-9C2605A29F52';
 
-                        if ((this.history[this.memoryAddress].temp == 0 &&
-                            this.history[this.memoryAddress].pressure == 0 &&
-                            this.history[this.memoryAddress].humidity == 0) || (this.history[this.memoryAddress].power == 0xFFFF) || (this.setTime == true)) {
+    class FakeGatoHistory {
+        constructor(accessoryType, accessory, size) {
+                this.log = accessory.log;
 
-                            var val = Format(
-                                '15%s0000 0000 0000 81%s0000 0000 00 0000',
-                                numToHex(swap16(this.currentEntry),4),
-                                numToHex(swap32(this.refTime),8)
-                            );
+                switch (accessoryType) {
+                    case TYPE_WEATHER:
+                        this.accessoryType116 = "03";
+                        this.accessoryType117 = "07";
+                        break;
+                    case TYPE_ENERGY:
+                        this.accessoryType116 = "07";
+                        this.accessoryType117 = "1f";
+                        break;
+                    case TYPE_ROOM:
+                        this.accessoryType116 = "04";
+                        this.accessoryType117 = "0f";
+                        break;
+                }
 
-                            this.log.debug("Data %s: %s", this.accessoryType, val);
-                            callback(null, hexToBase64(val));
-                            this.setTime=false;
-                            this.currentEntry++;
-                        }
-                        else {
-                            for (var i = 0;i < 11;i++) {
-                                switch (this.accessoryType) {
-                                    case TYPE_WEATHER:
-                                        this.log.debug("%s Entry: %s, Address: %s", this.accessoryType, this.currentEntry, this.memoryAddress);
-                                        this.dataStream += Format(
-                                            " 10 %s 0000 %s%s%s%s%s",
-                                            numToHex(swap16(this.currentEntry), 4),
-                                            numToHex(swap32(this.history[this.memoryAddress].time - this.refTime - EPOCH_OFFSET), 8),
-                                            this.accessoryType117,
-                                            numToHex(swap16(this.history[this.memoryAddress].temp * 100), 4),
-                                            numToHex(swap16(this.history[this.memoryAddress].humidity*100), 4),
-                                            numToHex(swap16(this.history[this.memoryAddress].pressure*10), 4)
-                                        );
-                                        break;
-                                    case TYPE_ENERGY:
-                                        this.log.debug("%s Entry: %s, Address: %s", this.accessoryType, this.currentEntry, this.memoryAddress);
-                                        this.dataStream += Format(
-                                            " 14 %s 0000 %s%s0000 0000%s0000 0000",
-                                            numToHex(swap16(this.currentEntry),4),
-                                            numToHex(swap32(this.history[this.memoryAddress].time - this.refTime - EPOCH_OFFSET), 8),
-                                            this.accessoryType117,
-                                            numToHex(swap16(this.history[this.memoryAddress].power * 10), 4)
-                                        );
-                                        break;
-                                }
-                                this.currentEntry++;
-                                this.memoryAddress = entry2address(this.currentEntry);
-                                if (this.currentEntry > this.lastEntry) {
-                                    break;
-                                }
-                            }
-                            this.log.debug("Data %s: %s", this.accessoryType, this.dataStream);
-                            callback(null, hexToBase64(this.dataStream));
-                            this.dataStream = '';
-                        }
-                    }
-                    else {
-                        this.transfer = false;
-                        callback(null, hexToBase64('00'));
-                    }
-            });
+                this.accessoryType = accessoryType;
+                this.firstEntry = 0;
+                this.lastEntry = 0;
+                this.history = [];
+                this.memorySize = size || 4032;
+                this.usedMemory = 0;
+                this.currentEntry = 1;
+                this.transfer = false;
+                this.setTime = true;
+                this.refTime = 0;
+                this.memoryAddress = 0;
+                this.dataStream = '';
 
-            this.addCharacteristic(S2W1Characteristic)
-                .on('set', this.setCurrentS2W1.bind(this));
+                this.service = accessory.getService(FakeGatoHistoryService);
 
-            this.addCharacteristic(S2W2Characteristic)
-                .on('set', this.setCurrentS2W2.bind(this));
+                if (this.service === undefined) {
+                    this.service = accessory.addService(FakeGatoHistoryService, ucfirst(accessoryType) + ' History', accessoryType);
+                }
+
+                this.service.getCharacteristic(S2R2Characteristic)
+                    .on('get', this.getCurrentS2R2.bind(this));
+
+                this.service.getCharacteristic(S2W1Characteristic)
+                    .on('set', this.setCurrentS2W1.bind(this));
+
+                this.service.getCharacteristic(S2W2Characteristic)
+                    .on('set', this.setCurrentS2W2.bind(this));
         }
 
         sendHistory(address){
@@ -222,12 +173,11 @@ module.exports = function(pHomebridge) {
             else {
                 this.currentEntry = 1;
             }
-            this.transfer=true;
+            this.transfer = true;
         }
 
         //in order to be consistent with Eve, entry address start from 1
         addEntry(entry){
-
             var entry2address = function(val) {
                 return val % this.memorySize;
             }.bind(this);   
@@ -244,15 +194,14 @@ module.exports = function(pHomebridge) {
 
             if (this.refTime == 0) {
                 this.refTime = entry.time - EPOCH_OFFSET;
-                switch (this.accessoryType)
-                    {
-                        case TYPE_WEATHER:
-                            this.history[this.lastEntry]= {time: entry.time, temp: 0, pressure: 0, humidity: 0};
-                            break;
-                        case TYPE_ENERGY:
-                            this.history[this.lastEntry]= {time: entry.time, power: 0xFFFF};
-                            break;
-                    }
+                switch (this.accessoryType) {
+                    case TYPE_WEATHER:
+                        this.history[this.lastEntry]= {time: entry.time, temp: 0, pressure: 0, humidity: 0};
+                        break;
+                    case TYPE_ENERGY:
+                        this.history[this.lastEntry]= {time: entry.time, power: 0xFFFF};
+                        break;
+                }
                 this.lastEntry++;
                 this.usedMemory++;
             }
@@ -268,12 +217,78 @@ module.exports = function(pHomebridge) {
                 numToHex(swap32(this.firstEntry), 8)
             );
 
-            this.getCharacteristic(S2R1Characteristic).setValue(hexToBase64(val));
+            this.service.getCharacteristic(S2R1Characteristic).setValue(hexToBase64(val));
 
             this.log.debug("First entry %s: %s", this.accessoryType, this.firstEntry.toString(16));
             this.log.debug("Last entry %s: %s", this.accessoryType, this.lastEntry.toString(16));
             this.log.debug("Used memory %s: %s", this.accessoryType, this.usedMemory.toString(16));
             this.log.debug("116 %s: %s", this.accessoryType, val);
+        }
+
+        getCurrentS2R2(callback) {
+            var entry2address = function(val) {
+                return val % this.memorySize;
+            }.bind(this);
+
+            if ((this.currentEntry < this.lastEntry) && (this.transfer == true)) {
+                this.memoryAddress = entry2address(this.currentEntry);
+
+                if ((this.history[this.memoryAddress].temp == 0 &&
+                    this.history[this.memoryAddress].pressure == 0 &&
+                    this.history[this.memoryAddress].humidity == 0) || this.history[this.memoryAddress].power == 0xFFFF || this.setTime == true) {
+
+                    var val = Format(
+                        '15%s0000 0000 0000 81%s0000 0000 00 0000',
+                        numToHex(swap16(this.currentEntry),4),
+                        numToHex(swap32(this.refTime),8)
+                    );
+
+                    this.log.debug("Data %s: %s", this.accessoryType, val);
+                    callback(null, hexToBase64(val));
+                    this.setTime=false;
+                    this.currentEntry++;
+                }
+                else {
+                    for (var i = 0; i < 11; i++) {
+                        switch (this.accessoryType) {
+                            case TYPE_WEATHER:
+                                this.log.debug("%s Entry: %s, Address: %s", this.accessoryType, this.currentEntry, this.memoryAddress);
+                                this.dataStream += Format(
+                                    " 10 %s 0000 %s%s%s%s%s",
+                                    numToHex(swap16(this.currentEntry), 4),
+                                    numToHex(swap32(this.history[this.memoryAddress].time - this.refTime - EPOCH_OFFSET), 8),
+                                    this.accessoryType117,
+                                    numToHex(swap16(this.history[this.memoryAddress].temp * 100), 4),
+                                    numToHex(swap16(this.history[this.memoryAddress].humidity*100), 4),
+                                    numToHex(swap16(this.history[this.memoryAddress].pressure*10), 4)
+                                );
+                                break;
+                            case TYPE_ENERGY:
+                                this.log.debug("%s Entry: %s, Address: %s", this.accessoryType, this.currentEntry, this.memoryAddress);
+                                this.dataStream += Format(
+                                    " 14 %s 0000 %s%s0000 0000%s0000 0000",
+                                    numToHex(swap16(this.currentEntry),4),
+                                    numToHex(swap32(this.history[this.memoryAddress].time - this.refTime - EPOCH_OFFSET), 8),
+                                    this.accessoryType117,
+                                    numToHex(swap16(this.history[this.memoryAddress].power * 10), 4)
+                                );
+                                break;
+                        }
+                        this.currentEntry++;
+                        this.memoryAddress = entry2address(this.currentEntry);
+                        if (this.currentEntry > this.lastEntry) {
+                            break;
+                        }
+                    }
+                    this.log.debug("Data %s: %s", this.accessoryType, this.dataStream);
+                    callback(null, hexToBase64(this.dataStream));
+                    this.dataStream = '';
+                }
+            }
+            else {
+                this.transfer = false;
+                callback(null, hexToBase64('00'));
+            }
         }
 
         setCurrentS2W1(val, callback) {
@@ -297,10 +312,7 @@ module.exports = function(pHomebridge) {
             this.log.debug("Clock adjust: %s", base64ToHex(val));
             callback(null, val);
         }
-
     }
 
-    FakeGatoHistoryService.UUID = 'E863F007-079E-48FF-8F27-9C2605A29F52';
-
-    return FakeGatoHistoryService;
+    return FakeGatoHistory;
 }
